@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#191919" />
+  <title>Bali Weather • Notion Widget</title>
+  <style>
+    :root { color-scheme: dark; font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #191919; color: #f3f3f3; padding: 2px; }
+    .card { width: 100%; min-height: 190px; border: 1px solid #363636; border-radius: 14px; background: #202020; padding: 20px 22px 15px; display: flex; flex-direction: column; gap: 12px; }
+    .eyebrow { font-size: 10px; text-transform: uppercase; letter-spacing: .14em; color: #a7a7a7; font-weight: 700; }
+    .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+    h1 { font-size: clamp(18px, 4.5vw, 23px); letter-spacing: -.035em; margin: 5px 0 2px; font-weight: 670; }
+    .location { color: #b6b6b6; font-size: 13px; margin: 5px 0 0; }
+    .icon { font-size: 39px; line-height: 1.1; flex-shrink: 0; }
+    .weather { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .temp { font-size: 35px; font-weight: 670; letter-spacing: -.07em; line-height: 1; }
+    .details { display: flex; flex-direction: column; gap: 3px; }
+    .conditions { font-size: 13px; font-weight: 600; }
+    .range { font-size: 12px; color: #bbb; }
+    .footer { border-top: 1px solid #353535; padding-top: 12px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .metric { font-size: 12px; color: #d7d7d7; }
+    .source { font-size: 10px; color: #929292; white-space: nowrap; }
+    .source a { color: #aaa; text-decoration: none; border-bottom: 1px solid #6f6f6f; }
+    .note { color: #a8a8a8; font-size: 11px; line-height: 1.4; }
+    .error { color: #efb6a9; font-size: 13px; line-height: 1.5; }
+    .loading { color: #c9c9c9; font-size: 13px; }
+    body.compact .card { min-height: 0; padding: 13px 16px; gap: 8px; }
+    body.compact .icon { font-size: 29px; }
+    body.compact h1 { font-size: 18px; }
+    body.compact .temp { font-size: 29px; }
+    body.compact .note { display: none; }
+    @media (max-width: 340px) { .card { padding: 15px; } .temp { font-size: 30px; } .icon { font-size: 30px; } .source { white-space: normal; } }
+  </style>
+</head>
+<body>
+  <main class="card" aria-live="polite">
+    <div class="head">
+      <div>
+        <div class="eyebrow" id="kind">Weather for your trip</div>
+        <h1 id="date">Loading date…</h1>
+        <p class="location" id="location">📍 Legian, Bali</p>
+      </div>
+      <div class="icon" id="icon" aria-hidden="true">🌤️</div>
+    </div>
+    <div class="weather" id="weather"><span class="loading">Checking weather data…</span></div>
+    <div class="note" id="note"></div>
+    <div class="footer">
+      <div class="metric" id="rain">Updated when you open this page</div>
+      <div class="source">Data: <a href="https://www.visualcrossing.com/" target="_blank" rel="noopener noreferrer">Visual Crossing Weather</a></div>
+    </div>
+  </main>
+  <script>
+    (() => {
+      const params = new URLSearchParams(location.search);
+      const date = params.get('date') || '2026-11-29';
+      const place = (params.get('location') || 'Legian, Bali').trim().slice(0, 100);
+      const compact = params.get('compact') === '1';
+      if (compact) document.body.classList.add('compact');
+
+      const els = Object.fromEntries(['kind','date','location','icon','weather','note','rain'].map(id => [id, document.getElementById(id)]));
+      els.location.textContent = '📍 ' + place;
+      const parsed = /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(date + 'T12:00:00Z') : null;
+      const validDate = parsed && !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === date;
+      if (!validDate || !place) { showError('Check the URL. Use ?date=2026-11-29&location=Legian,Bali'); return; }
+      els.date.textContent = new Intl.DateTimeFormat('en-GB', {weekday:'long', day:'numeric', month:'long', timeZone:'UTC'}).format(parsed);
+
+      const nowParts = new Intl.DateTimeFormat('en-CA', {timeZone:'Asia/Makassar',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());
+      const getPart = type => +nowParts.find(x => x.type === type).value;
+      const todayUTC = Date.UTC(getPart('year'), getPart('month') - 1, getPart('day'));
+      const requestedUTC = Date.UTC(+date.slice(0,4), +date.slice(5,7)-1, +date.slice(8,10));
+      const daysAway = Math.round((requestedUTC - todayUTC) / 86400000);
+      const label = daysAway < 0 ? 'Past weather' : daysAway <= 14 ? 'Daily forecast' : 'Seasonal estimate';
+      els.kind.textContent = label;
+      if (daysAway > 14) els.note.textContent = 'Based on typical past weather, not a reliable day-specific forecast. This updates to a forecast nearer the date.';
+      else if (daysAway >= 0) els.note.textContent = 'Forecasts can change as the date approaches.';
+      else els.note.textContent = 'Historical observations / weather records.';
+
+      function showError(message) {
+        els.weather.replaceChildren();
+        const node = document.createElement('div');
+        node.className = 'error'; node.textContent = message;
+        els.weather.append(node);
+        els.rain.textContent = 'Weather unavailable';
+      }
+      function fmt(n) { return typeof n === 'number' && Number.isFinite(n) ? Math.round(n) + '°' : '—'; }
+      function emoji(icon = '', conditions = '') {
+        const s = (icon + ' ' + conditions).toLowerCase();
+        if (s.includes('thunder')) return '⛈️';
+        if (s.includes('snow')) return '❄️';
+        if (s.includes('rain') || s.includes('shower')) return '🌧️';
+        if (s.includes('fog') || s.includes('mist')) return '🌫️';
+        if (s.includes('partly')) return '⛅';
+        if (s.includes('cloud')) return '☁️';
+        if (s.includes('clear') || s.includes('sun')) return '☀️';
+        return '🌤️';
+      }
+      function render(day) {
+        els.icon.textContent = emoji(day.icon, day.conditions);
+        els.weather.replaceChildren();
+        const temp = document.createElement('div'); temp.className = 'temp'; temp.textContent = fmt(day.temp ?? day.tempmax); els.weather.append(temp);
+        const details = document.createElement('div'); details.className = 'details';
+        const cond = document.createElement('div'); cond.className = 'conditions'; cond.textContent = day.conditions || 'Weather estimate';
+        const range = document.createElement('div'); range.className = 'range'; range.textContent = `High ${fmt(day.tempmax)}  ·  Low ${fmt(day.tempmin)}`;
+        details.append(cond, range); els.weather.append(details);
+        if (daysAway > 14) {
+          els.rain.textContent = typeof day.precip === 'number' ? `🌧️ Typical rainfall: ${day.precip.toFixed(1)} mm` : '📅 Long-range seasonal estimate';
+        } else {
+          els.rain.textContent = typeof day.precipprob === 'number' ? `🌧️ Chance of rain: ${Math.round(day.precipprob)}%` : (typeof day.precip === 'number' ? `🌧️ Rainfall: ${day.precip.toFixed(1)} mm` : 'Forecast data');
+        }
+      }
+
+      const key = `bali-weather-v1:${date}:${place.toLowerCase()}`;
+      try {
+        const saved = JSON.parse(localStorage.getItem(key) || 'null');
+        if (saved && Date.now() - saved.at < 4 * 60 * 60 * 1000 && saved.day) { render(saved.day); return; }
+      } catch (_) { /* storage blocked, continue */ }
+
+      const fields = 'datetime,temp,tempmax,tempmin,precipprob,precip,conditions,icon';
+      const url = `https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline/${encodeURIComponent(place)}/${date}?unitGroup=metric&include=days&elements=${fields}&contentType=json`;
+      fetch(url, {cache: 'no-store', credentials: 'omit'})
+        .then(async res => { if (!res.ok) throw new Error(res.status === 429 ? 'Rate limit reached; try again later.' : `Weather request failed (HTTP ${res.status}).`); return res.json(); })
+        .then(json => {
+          const day = json.days?.find(x => x.datetime === date) || json.days?.[0];
+          if (!day) throw new Error('No weather data returned for this date.');
+          render(day);
+          try { localStorage.setItem(key, JSON.stringify({at: Date.now(), day})); } catch (_) {}
+        })
+        .catch(err => { console.error(err); showError('Could not load the weather right now. Try refreshing later.'); });
+    })();
+  </script>
+</body>
+</html>
